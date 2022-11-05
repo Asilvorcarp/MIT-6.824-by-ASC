@@ -114,7 +114,7 @@ func (worker *WorkerType) ReportAlive() error {
 // reduce, report and set state when done
 func (worker *WorkerType) Reduce(
 	reducef func(string, []string) string,
-	reduceArgs ReduceArgsType,
+	reduceArgs ReduceArgs,
 ) error {
 	args := doReduce(reducef, reduceArgs)
 	// report result
@@ -131,7 +131,7 @@ func (worker *WorkerType) Reduce(
 // map, report and set state when done
 func (worker *WorkerType) Map(
 	mapf func(string, string) []KeyValue,
-	mapArgs MapArgsType,
+	mapArgs MapArgs,
 ) error {
 	args := doMap(mapf, mapArgs)
 	// report result
@@ -147,17 +147,18 @@ func (worker *WorkerType) Map(
 
 func doReduce(
 	reducef func(string, []string) string,
-	reduceArgs ReduceArgsType,
-) (res ReduceDoneType) {
+	reduceArgs ReduceArgs,
+) (ret ReduceDoneArgs) {
 	reduceNumber := reduceArgs.ReduceNumber
 	intermFiles := reduceArgs.IntermFiles
+	ret.ReduceNumber = reduceNumber
 	// read interm files
 	kva := []KeyValue{}
 	for _, intermFile := range intermFiles {
 		file, err := os.Open(intermFile)
 		if err != nil {
 			log.Fatalf("cannot open %v", intermFile)
-			res.Err = err
+			ret.Err = err
 			return
 		}
 		dec := json.NewDecoder(file)
@@ -176,7 +177,7 @@ func doReduce(
 	ofile, err := os.Create(oname)
 	if err != nil {
 		log.Fatalf("cannot create %v", oname)
-		res.Err = err
+		ret.Err = err
 		return
 	}
 	// reduce
@@ -197,29 +198,29 @@ func doReduce(
 		i = j
 	}
 	ofile.Close()
-	// res.err = nil
-	res.OFile = oname
+	// ret.err = nil
 	return
 }
 
 func doMap(
 	mapf func(string, string) []KeyValue,
-	mapArgs MapArgsType,
-) (res MapDoneType) {
+	mapArgs MapArgs,
+) (ret MapDoneArgs) {
 	mapNumber := mapArgs.MapNumber
 	filename := mapArgs.Filename
 	NReduce := mapArgs.NReduce
+	ret.MapNumber = mapNumber
 	// get content
 	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatalf("cannot open %v", filename)
-		res.Err = err
+		ret.Err = err
 		return
 	}
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
 		log.Fatalf("cannot read %v", filename)
-		res.Err = err
+		ret.Err = err
 		return
 	}
 	file.Close()
@@ -241,7 +242,7 @@ func doMap(
 		ofile, err := os.Create(oname)
 		if err != nil {
 			log.Fatalf("cannot create %v", oname)
-			res.Err = err
+			ret.Err = err
 			return
 		}
 		enc := json.NewEncoder(ofile)
@@ -251,8 +252,8 @@ func doMap(
 		ofile.Close()
 		intermFiles = append(intermFiles, oname)
 	}
-	// res.err = nil
-	res.IntermFiles = intermFiles
+	// ret.err = nil
+	ret.IntermFiles = intermFiles
 	return
 }
 

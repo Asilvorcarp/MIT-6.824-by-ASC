@@ -41,28 +41,31 @@ const ( // enum TaskType
 	NoTask
 )
 
-type MapArgsType struct {
+type MapArgs struct {
 	MapNumber int
 	Filename  string
 	NReduce   int
 }
 
-type MapDoneType struct {
+type MapDoneArgs struct {
 	Err         error
+	MapNumber   int
 	IntermFiles []string
 }
 
 type MapDoneReply struct {
 }
 
-type ReduceArgsType struct {
+type ReduceArgs struct {
 	ReduceNumber int
 	IntermFiles  []string
 }
 
-type ReduceDoneType struct {
-	Err   error
-	OFile string
+type ReduceDoneArgs struct {
+	Err          error
+	ReduceNumber int
+	// OFile string // "mr-out-X"
+	// no need because we can infer from ReduceNumber
 }
 type ReduceDoneReply struct {
 }
@@ -72,8 +75,8 @@ type GetTaskArgs struct {
 
 type GetTaskReply struct {
 	Task       TaskType
-	MapArgs    MapArgsType
-	ReduceArgs ReduceArgsType
+	MapArgs    MapArgs
+	ReduceArgs ReduceArgs
 }
 
 // Cook up a unique-ish UNIX-domain socket name

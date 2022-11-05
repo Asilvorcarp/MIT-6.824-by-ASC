@@ -1,11 +1,13 @@
 package mr
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"net/rpc"
 	"os"
+	"time"
 )
 
 type TaskStatusType int
@@ -18,20 +20,54 @@ const ( // enum TaskStatusType
 
 type Coordinator struct {
 	/// Your definitions here.
-	// things assigned by user
+	// currently one map task just deal with one file (nMap == nFiles)
 	inputFiles []string
-	nReduce    int
-	// map task number to status, len is nMapAssigned
-	mapTaskStatus map[int]TaskStatusType
-	// map task number to intermediate files, len is nMapDone
-	intermFiles map[int][]string
-	// reduce task number to status
-	reduceTaskStatus map[int]TaskStatusType
+	// can be infered from len of taskStatus actually
+	nReduce int
+	nMap    int
+	// map task number to status, len is nMap
+	mapTaskStatus []TaskStatusType
+	// number of map tasks done
+	mapDone int
+	// map task number to intermediate files
+	intermFiles [][]string
+	// reduce task number to status, len is nReduce
+	reduceTaskStatus []TaskStatusType
+	// number of reduce tasks done
+	reduceDone int
+	// last time worker is alive, alive[0:map/1:reduce][task number]
+	alive [2][]time.Time
+	// TODO: add lock/mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) AssignTask(args *GetTaskArgs, reply *GetTaskReply) error {
-	// TODO
+	mapAllDone := c.mapDone == c.nMap
+	if !mapAllDone {
+		// assign map task
+		for i, status := range c.mapTaskStatus {
+			if status == Idle {
+				reply.Task = Map
+				reply.MapArgs.MapNumber = i
+				reply.MapArgs.Filename = c.inputFiles[i]
+				reply.MapArgs.NReduce = c.nReduce
+				c.mapTaskStatus[i] = InProgress
+				return nil
+			}
+		}
+	} else {
+		// assign reduce task
+		for i, status := range c.reduceTaskStatus {
+			if status == Idle {
+				reply.Task = Reduce
+				reply.ReduceArgs.ReduceNumber = i
+				reply.ReduceArgs.IntermFiles = c.intermFiles[i]
+				c.reduceTaskStatus[i] = InProgress
+				return nil
+			}
+		}
+	}
+	reply.Task = NoTask
 	return nil
 }
 
@@ -61,10 +97,75 @@ func (c *Coordinator) server() {
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
 	ret := false // exit when true
-
-	// Your code here.
-
+	if c.nMap == c.mapDone && c.nReduce == c.reduceDone {
+		ret = true
+	}
 	return ret
+}
+
+func (c *Coordinator) MapDone(args *MapDoneArgs, reply *MapDoneReply) error {
+	if args.Err != nil {
+		c.mapTaskStatus[args.MapNumber] = Idle
+		return nil
+	}
+	c.intermFiles[args.MapNumber] = args.IntermFiles
+	c.mapTaskStatus[args.MapNumber] = Completed
+	c.mapDone++
+	fmt.Printf("coor: map task %d done", args.MapNumber)
+	return nil
+}
+
+func (c *Coordinator) ReduceDone(args *ReduceDoneArgs, reply *ReduceDoneReply) error {
+	if args.Err != nil {
+		c.reduceTaskStatus[args.ReduceNumber] = Idle
+		return nil
+	}
+	c.reduceTaskStatus[args.ReduceNumber] = Completed
+	c.reduceDone++
+	fmt.Printf("coor: reduce task %d done", args.ReduceNumber)
+	return nil
+}
+
+// update alive time
+func (c *Coordinator) WorkerAlive(args *AliveArgs, reply *AliveReply) error {
+	c.alive[args.task][args.taskNumber] = time.Now()
+	return nil
+}
+
+// keep on detecting dead worker
+func (c *Coordinator) detecter() {
+	for {
+		if c.Done() {
+			break
+		}
+		c.detect()
+		time.Sleep(1 * time.Second)
+	}
+}
+
+// detect dead worker
+// if a worker is dead, set its task status to Idle
+func (c *Coordinator) detect() {
+	timeoutPeriod := 10 * time.Second
+	mapAllDone := c.mapDone == c.nMap
+	// map / reduce that is in progress
+	if !mapAllDone {
+		for i, status := range c.mapTaskStatus {
+			if status == InProgress {
+				if time.Since(c.alive[Map][i]) > timeoutPeriod {
+					c.mapTaskStatus[i] = Idle
+				}
+			}
+		}
+	} else {
+		for i, status := range c.reduceTaskStatus {
+			if status == InProgress {
+				if time.Since(c.alive[Reduce][i]) > timeoutPeriod {
+					c.reduceTaskStatus[i] = Idle
+				}
+			}
+		}
+	}
 }
 
 // create a Coordinator.
@@ -72,8 +173,30 @@ func (c *Coordinator) Done() bool {
 // nReduce is the number of reduce tasks to use.
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
+	c.inputFiles = files
+	c.nMap = len(files)
+	c.nReduce = nReduce
+	c.mapDone = 0
+	c.mapTaskStatus = make([]TaskStatusType, c.nMap)
+	c.intermFiles = make([][]string, nReduce)
+	c.reduceTaskStatus = make([]TaskStatusType, nReduce)
 
 	// Your code here.
+	for i := 0; i < c.nMap; i++ {
+		c.mapTaskStatus[i] = Idle
+	}
+	for i := 0; i < c.nReduce; i++ {
+		c.reduceTaskStatus[i] = Idle
+	}
+	c.alive[Map] = make([]time.Time, c.nMap)
+	c.alive[Reduce] = make([]time.Time, nReduce)
+	for i := 0; i < c.nMap; i++ {
+		c.alive[Map][i] = time.Now()
+	}
+	for i := 0; i < c.nReduce; i++ {
+		c.alive[Reduce][i] = time.Now()
+	}
+	go c.detecter()
 
 	c.server()
 	return &c
