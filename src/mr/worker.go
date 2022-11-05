@@ -2,6 +2,7 @@ package mr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"io/ioutil"
@@ -42,72 +43,112 @@ const ( // enum WorkerState
 )
 
 type WorkerType struct {
+	id         int // mainly for debug
 	state      WorkerState
 	task       TaskType
 	taskNumber int
-	taskDone   chan bool
 }
 
+var workerCounter int = 0
+
 // main/mrworker.go calls this function.
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
+func Worker(
+	mapf func(string, string) []KeyValue,
+	reducef func(string, []string) string,
+) {
 	/// Your worker implementation here.
 	worker := WorkerType{
-		state:    WorkerIdle,
-		taskDone: make(chan bool, 1),
+		id:    workerCounter,
+		state: WorkerIdle,
 	}
+	workerCounter++
 	// keep in touch with coordinator
 	for {
 		switch worker.state {
 		case WorkerIdle:
 			// ask for a task
-			reply := CallGetTask()
+			err, reply := worker.GetTask()
+			if err != nil {
+				// coordinator is dead
+				// consider as all tasks are done
+				return
+			}
 			if reply.Task == Map {
-				worker.state = WorkerWorking
+				worker.SetState(WorkerWorking)
 				worker.task = Map
 				worker.taskNumber = reply.MapArgs.MapNumber
-				go worker.doMap(mapf, reply.MapArgs)
+				go worker.Map(mapf, reply.MapArgs)
 			} else if reply.Task == Reduce {
-				worker.state = WorkerWorking
+				worker.SetState(WorkerWorking)
 				worker.task = Reduce
 				worker.taskNumber = reply.ReduceArgs.ReduceNumber
-				go worker.doReduce(reducef, reply.ReduceArgs)
+				go worker.Reduce(reducef, reply.ReduceArgs)
 			} else if reply.Task == NoTask {
-				// no task, wait for a while
+				// no task for now, wait for a while
 			}
 		case WorkerWorking:
 			// report alive
-			reply := CallAlive(worker.task, worker.taskNumber)
-			if reply.Err != nil {
-				// coordinator is dead, all tasks are done
-				return
-			} else {
-				// wait for task done
-				<-worker.taskDone
-				worker.state = WorkerIdle
-			}
+			worker.ReportAlive()
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 }
 
-func CallAlive(taskType TaskType, taskNumber int) {
-	args := ExampleArgs{}
-	args.X = 99
-	reply := ExampleReply{}
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
-	}
+func (worker *WorkerType) SetState(state WorkerState) {
+	worker.state = state
 }
 
-func (worker *WorkerType) doReduce(
+func (worker *WorkerType) ReportAlive() error {
+	args := AliveArgs{}
+	args.task = worker.task
+	args.taskNumber = worker.taskNumber
+	reply := AliveReply{}
+	ok := call("Coordinator.WorkerAlive", &args, &reply)
+	if !ok {
+		fmt.Printf("call alive failed!\n")
+		return errors.New("call alive failed")
+	}
+	return nil
+}
+
+// reduce, report and set state when done
+func (worker *WorkerType) Reduce(
 	reducef func(string, []string) string,
 	reduceArgs ReduceArgsType,
-) (res ReduceReplyType) {
+) error {
+	args := doReduce(reducef, reduceArgs)
+	// report result
+	reply := ReduceDoneReply{}
+	ok := call("Coordinator.ReduceDone", &args, &reply)
+	if !ok {
+		fmt.Printf("call reduce done failed!\n")
+		return errors.New("call reduce done failed")
+	}
+	worker.SetState(WorkerIdle)
+	return nil
+}
+
+// map, report and set state when done
+func (worker *WorkerType) Map(
+	mapf func(string, string) []KeyValue,
+	mapArgs MapArgsType,
+) error {
+	args := doMap(mapf, mapArgs)
+	// report result
+	reply := MapDoneReply{}
+	ok := call("Coordinator.MapDone", &args, &reply)
+	if !ok {
+		fmt.Printf("call map done failed!\n")
+		return errors.New("call map done failed")
+	}
+	worker.SetState(WorkerIdle)
+	return nil
+}
+
+func doReduce(
+	reducef func(string, []string) string,
+	reduceArgs ReduceArgsType,
+) (res ReduceDoneType) {
 	reduceNumber := reduceArgs.ReduceNumber
 	intermFiles := reduceArgs.IntermFiles
 	// read interm files
@@ -161,10 +202,10 @@ func (worker *WorkerType) doReduce(
 	return
 }
 
-func (worker *WorkerType) doMap(
+func doMap(
 	mapf func(string, string) []KeyValue,
 	mapArgs MapArgsType,
-) (res MapReplyType) {
+) (res MapDoneType) {
 	mapNumber := mapArgs.MapNumber
 	filename := mapArgs.Filename
 	NReduce := mapArgs.NReduce
@@ -215,21 +256,23 @@ func (worker *WorkerType) doMap(
 	return
 }
 
-func CallGetTask() GetTaskReply {
+func (worker *WorkerType) GetTask() (error, GetTaskReply) {
 	args := GetTaskArgs{}
 	reply := GetTaskReply{}
 	ok := call("Coordinator.AssignTask", &args, &reply)
 	if ok {
 		if reply.Task == Map {
-			fmt.Printf("get map task %d with filename: %v\n", reply.MapNumber, reply.Filename)
+			fmt.Printf("worker %d get map task %d\n", worker.id, reply.MapArgs.MapNumber)
 		} else if reply.Task == Reduce {
-			// TODO
-			// fmt.Printf("get task reduce with reduce number: %v\n", reply.ReduceNumber)
+			fmt.Printf("worker %d get reduce task %d\n", worker.id, reply.ReduceArgs.ReduceNumber)
 		}
 	} else {
 		fmt.Printf("get task failed!\n")
+		fmt.Printf("consider as tasks all done.\n")
+		fmt.Printf("worker %v exiting...\n", worker.id)
+		return errors.New("get task failed"), reply
 	}
-	return reply
+	return nil, reply
 }
 
 // example function to show how to make an RPC call to the coordinator.

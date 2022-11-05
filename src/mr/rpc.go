@@ -24,6 +24,14 @@ type ExampleReply struct {
 	Y int
 }
 
+type AliveArgs struct {
+	task       TaskType
+	taskNumber int
+}
+
+type AliveReply struct {
+}
+
 // Add your RPC definitions here.
 type TaskType int
 
@@ -39,9 +47,12 @@ type MapArgsType struct {
 	NReduce   int
 }
 
-type MapReplyType struct {
+type MapDoneType struct {
 	Err         error
 	IntermFiles []string
+}
+
+type MapDoneReply struct {
 }
 
 type ReduceArgsType struct {
@@ -49,9 +60,11 @@ type ReduceArgsType struct {
 	IntermFiles  []string
 }
 
-type ReduceReplyType struct {
+type ReduceDoneType struct {
 	Err   error
 	OFile string
+}
+type ReduceDoneReply struct {
 }
 
 type GetTaskArgs struct {
