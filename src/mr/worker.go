@@ -10,6 +10,7 @@ import (
 	"net/rpc"
 	"os"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -47,6 +48,7 @@ type WorkerType struct {
 	state      WorkerState
 	task       TaskType
 	taskNumber int
+	mutex      sync.Mutex
 }
 
 var workerCounter int = 0
@@ -64,8 +66,10 @@ func Worker(
 	workerCounter++
 	// keep in touch with coordinator
 	for {
+		worker.mutex.Lock()
 		switch worker.state {
 		case WorkerIdle:
+			worker.mutex.Unlock()
 			// ask for a task
 			err, reply := worker.GetTask()
 			if err != nil {
@@ -75,18 +79,17 @@ func Worker(
 			}
 			if reply.Task == Map {
 				worker.SetState(WorkerWorking)
-				worker.task = Map
-				worker.taskNumber = reply.MapArgs.MapNumber
+				worker.SetTaskAndNumber(Map, reply.MapArgs.MapNumber)
 				go worker.Map(mapf, reply.MapArgs)
 			} else if reply.Task == Reduce {
 				worker.SetState(WorkerWorking)
-				worker.task = Reduce
-				worker.taskNumber = reply.ReduceArgs.ReduceNumber
+				worker.SetTaskAndNumber(Reduce, reply.ReduceArgs.ReduceNumber)
 				go worker.Reduce(reducef, reply.ReduceArgs)
 			} else if reply.Task == NoTask {
 				// no task for now, wait for a while
 			}
 		case WorkerWorking:
+			worker.mutex.Unlock()
 			// report alive
 			worker.ReportAlive()
 		}
@@ -95,13 +98,30 @@ func Worker(
 }
 
 func (worker *WorkerType) SetState(state WorkerState) {
+	worker.mutex.Lock()
 	worker.state = state
+	worker.mutex.Unlock()
+}
+
+func (worker *WorkerType) SetTaskAndNumber(task TaskType, taskNumber int) {
+	worker.mutex.Lock()
+	worker.task = task
+	worker.taskNumber = taskNumber
+	worker.mutex.Unlock()
+}
+
+func (worker *WorkerType) GetId() int {
+	worker.mutex.Lock()
+	defer worker.mutex.Unlock()
+	return worker.id
 }
 
 func (worker *WorkerType) ReportAlive() error {
 	args := AliveArgs{}
-	args.task = worker.task
-	args.taskNumber = worker.taskNumber
+	worker.mutex.Lock()
+	args.Task = worker.task
+	args.TaskNumber = worker.taskNumber
+	worker.mutex.Unlock()
 	reply := AliveReply{}
 	ok := call("Coordinator.WorkerAlive", &args, &reply)
 	if !ok {
@@ -263,14 +283,14 @@ func (worker *WorkerType) GetTask() (error, GetTaskReply) {
 	ok := call("Coordinator.AssignTask", &args, &reply)
 	if ok {
 		if reply.Task == Map {
-			fmt.Printf("worker %d get map task %d\n", worker.id, reply.MapArgs.MapNumber)
+			fmt.Printf("worker %d get map task %d\n", worker.GetId(), reply.MapArgs.MapNumber)
 		} else if reply.Task == Reduce {
-			fmt.Printf("worker %d get reduce task %d\n", worker.id, reply.ReduceArgs.ReduceNumber)
+			fmt.Printf("worker %d get reduce task %d\n", worker.GetId(), reply.ReduceArgs.ReduceNumber)
 		}
 	} else {
 		fmt.Printf("get task failed!\n")
 		fmt.Printf("consider as tasks all done.\n")
-		fmt.Printf("worker %v exiting...\n", worker.id)
+		fmt.Printf("worker %v exiting...\n", worker.GetId())
 		return errors.New("get task failed"), reply
 	}
 	return nil, reply

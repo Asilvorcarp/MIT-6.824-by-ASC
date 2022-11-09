@@ -25,8 +25,8 @@ type ExampleReply struct {
 }
 
 type AliveArgs struct {
-	task       TaskType
-	taskNumber int
+	Task       TaskType
+	TaskNumber int
 }
 
 type AliveReply struct {
