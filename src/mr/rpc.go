@@ -48,9 +48,10 @@ type MapArgs struct {
 }
 
 type MapDoneArgs struct {
-	Err         error
-	MapNumber   int
-	IntermFiles []string
+	Err       error
+	MapNumber int
+	// IntermFiles []string
+	// no need because we can infer from MapNumber and NReduce
 }
 
 type MapDoneReply struct {
@@ -58,7 +59,9 @@ type MapDoneReply struct {
 
 type ReduceArgs struct {
 	ReduceNumber int
-	IntermFiles  []string
+	NMap         int
+	// IntermFiles  []string
+	// no need because we can infer from ReduceNumber and NMap
 }
 
 type ReduceDoneArgs struct {

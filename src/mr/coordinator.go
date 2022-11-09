@@ -31,8 +31,6 @@ type Coordinator struct {
 	mapTaskStatus []TaskStatusType
 	// number of map tasks done
 	mapDone int
-	// map task number to intermediate files
-	intermFiles [][]string
 	// reduce task number to status, len is nReduce
 	reduceTaskStatus []TaskStatusType
 	// number of reduce tasks done
@@ -64,8 +62,7 @@ func (c *Coordinator) AssignTask(args *GetTaskArgs, reply *GetTaskReply) error {
 			if status == Idle {
 				reply.Task = Reduce
 				reply.ReduceArgs.ReduceNumber = i
-				// TODO FIX
-				reply.ReduceArgs.IntermFiles = c.intermFiles[i]
+				reply.ReduceArgs.NMap = c.nMap
 				c.reduceTaskStatus[i] = InProgress
 				return nil
 			}
@@ -116,8 +113,6 @@ func (c *Coordinator) MapDone(args *MapDoneArgs, reply *MapDoneReply) error {
 		c.mapTaskStatus[args.MapNumber] = Idle
 		return nil
 	}
-	// TODO transpose, or dont store, infer at realtime
-	c.intermFiles[args.MapNumber] = args.IntermFiles
 	c.mapTaskStatus[args.MapNumber] = Completed
 	c.mapDone++
 	fmt.Printf("coor: map task %d done\n", args.MapNumber)
@@ -195,7 +190,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.nReduce = nReduce
 	c.mapDone = 0
 	c.mapTaskStatus = make([]TaskStatusType, c.nMap)
-	c.intermFiles = make([][]string, nReduce)
 	c.reduceTaskStatus = make([]TaskStatusType, nReduce)
 
 	// Your code here.

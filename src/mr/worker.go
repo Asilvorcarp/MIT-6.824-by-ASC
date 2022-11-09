@@ -170,7 +170,12 @@ func doReduce(
 	reduceArgs ReduceArgs,
 ) (ret ReduceDoneArgs) {
 	reduceNumber := reduceArgs.ReduceNumber
-	intermFiles := reduceArgs.IntermFiles
+	nMap := reduceArgs.NMap
+	intermFiles := make([]string, 0)
+	for i := 0; i < nMap; i++ {
+		interm := fmt.Sprintf("mr-%d-%d.json", i, reduceNumber)
+		intermFiles = append(intermFiles, interm)
+	}
 	ret.ReduceNumber = reduceNumber
 	// read interm files
 	kva := []KeyValue{}
@@ -273,7 +278,6 @@ func doMap(
 		intermFiles = append(intermFiles, oname)
 	}
 	// ret.err = nil
-	ret.IntermFiles = intermFiles
 	return
 }
 
