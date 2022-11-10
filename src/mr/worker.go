@@ -51,19 +51,22 @@ type WorkerType struct {
 	mutex      sync.Mutex
 }
 
-var workerCounter int = 0
-
 // main/mrworker.go calls this function.
 func Worker(
 	mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string,
 ) {
 	/// Your worker implementation here.
+	workerCounter, err := GetWorkerCounterAndInc()
+	if err != nil {
+		fmt.Print("read counter error\n")
+		return
+	}
 	worker := WorkerType{
 		id:    workerCounter,
 		state: WorkerIdle,
 	}
-	workerCounter++
+	fmt.Printf("worker %d created\n", workerCounter)
 	// keep in touch with coordinator
 	for {
 		worker.mutex.Lock()
@@ -95,6 +98,34 @@ func Worker(
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+func GetWorkerCounterAndInc() (int, error) {
+	filename := "worker_counter.json"
+	c := 0
+	var file *os.File
+	// if file not exist, create it
+	if _, err := os.Stat(filename); os.IsNotExist(err) {
+		file, err = os.Create(filename)
+		fmt.Print("create file\n")
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		file, err = os.OpenFile(filename, os.O_WRONLY, os.ModePerm)
+		fmt.Print("open file\n")
+		if err != nil {
+			return 0, err
+		}
+		dec := json.NewDecoder(file)
+		dec.Decode(&c)
+		os.Truncate(file.Name(), 0)
+		c++
+	}
+	enc := json.NewEncoder(file)
+	enc.Encode(&c)
+	file.Close()
+	return c, nil
 }
 
 func (worker *WorkerType) SetState(state WorkerState) {
